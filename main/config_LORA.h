@@ -40,7 +40,7 @@ extern void MQTTtoLORA(char* topicOri, JsonObject& RFdata);
 #  define LORA_BAND 915E6
 #endif
 #define LORA_SIGNAL_BANDWIDTH 125E3
-#define LORA_TX_POWER         17
+#define LORA_TX_POWER         20
 #define LORA_SPREADING_FACTOR 7
 #define LORA_CODING_RATE      5
 #define LORA_PREAMBLE_LENGTH  8

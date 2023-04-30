@@ -29,7 +29,6 @@
 extern void setupONOFF();
 extern void MQTTtoONOFF(char* topicOri, char* datacallback);
 extern void MQTTtoONOFF(char* topicOri, JsonObject& RFdata);
-extern void stateONOFFMeasures();
 /*----------------------------USER PARAMETERS-----------------------------*/
 /*-------------DEFINE YOUR MQTT PARAMETERS BELOW----------------*/
 #define subjectMQTTtoONOFF    "/commands/MQTTtoONOFF"

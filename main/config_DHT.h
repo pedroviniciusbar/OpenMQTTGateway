@@ -27,8 +27,7 @@
 #define config_DHT_h
 
 extern void setupDHT();
-extern void MeasureTempAndHum();
-
+extern void DHTtoMQTT();
 /*----------------------------USER PARAMETERS-----------------------------*/
 /*-------------DEFINE YOUR MQTT PARAMETERS BELOW----------------*/
 #define DHTTOPIC              "/DHTtoMQTT/dht1"
@@ -37,9 +36,7 @@ extern void MeasureTempAndHum();
 /*-------------DHT SENSOR TYPE-------------*/
 //#define DHT_SENSOR_TYPE DHT11 //uncomment for DHT11 Sensor
 //#define DHT_SENSOR_TYPE DHT21 //uncomment for DHT21 Sensor
-#ifndef DHT_SENSOR_TYPE
-#  define DHT_SENSOR_TYPE DHT22 //uncomment for DHT22 Sensor (default for backwards compatibility)
-#endif
+#define DHT_SENSOR_TYPE DHT22 //uncomment for DHT22 Sensor (default for backwards compatibility)
 /*-------------------PIN DEFINITIONS----------------------*/
 #ifndef DHT_RECEIVER_GPIO
 #  if defined(ESP8266)

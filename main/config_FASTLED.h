@@ -24,10 +24,6 @@
 #ifndef config_FASTLED_h
 #define config_FASTLED_h
 
-extern void setupFASTLED();
-extern void FASTLEDLoop();
-extern void MQTTtoFASTLED(char*, char*);
-extern void MQTTtoFASTLED(char*, JsonObject&);
 /*-------------------FASTLED topics & parameters----------------------*/
 //FASTLED MQTT Subjects
 #define subjectMQTTtoFASTLED              "/commands/MQTTtoFASTLED"

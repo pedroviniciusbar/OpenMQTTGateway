@@ -303,7 +303,7 @@ void createDiscovery(const char* sensor_type,
     sensor["pl_avail"] = payload_available; // payload_on
   if (payload_not_available[0])
     sensor["pl_not_avail"] = payload_not_available; //payload_off
-  if (state_class && state_class[0])
+  if (state_class[0])
     sensor["state_class"] = state_class; //add the state class on the sensors ( https://developers.home-assistant.io/docs/core/entity/sensor/#available-state-classes )
   if (state_on != nullptr)
     if (strcmp(state_on, "true") == 0) {
@@ -478,7 +478,7 @@ void pubMqttDiscovery() {
 
 #    ifdef ZdisplaySSD1306
   createDiscovery("switch", //set Type
-                  subjectSSD1306toMQTT, "SSD1306: Control", (char*)getUniqueId("onstate", "").c_str(), //set state_topic,name,uniqueId
+                  subjectSSD1306toMQTT, "SS1306: Control", (char*)getUniqueId("onstate", "").c_str(), //set state_topic,name,uniqueId
                   will_Topic, "", "{{ value_json.onstate }}", //set availability_topic,device_class,value_template,
                   "{\"onstate\":true,\"save\":true}", "{\"onstate\":false,\"save\":true}", "", //set,payload_on,payload_off,unit_of_meas,
                   0, //set  off_delay
@@ -488,7 +488,7 @@ void pubMqttDiscovery() {
                   "false", "true" //state_off, state_on
   );
   createDiscovery("switch", //set Type
-                  subjectSSD1306toMQTT, "SSD1306: Display metric", (char*)getUniqueId("displaymetric", "").c_str(), //set state_topic,name,uniqueId
+                  subjectSSD1306toMQTT, "SS1306: Display metric", (char*)getUniqueId("displaymetric", "").c_str(), //set state_topic,name,uniqueId
                   will_Topic, "", "{{ value_json.displaymetric }}", //set availability_topic,device_class,value_template,
                   "{\"displaymetric\":true,\"save\":true}", "{\"displaymetric\":false,\"save\":true}", "", //set,payload_on,payload_off,unit_of_meas,
                   0, //set  off_delay
@@ -761,27 +761,6 @@ void pubMqttDiscovery() {
                     subjectBH1750toMQTT, BH1750sensor[i][1], (char*)getUniqueId(BH1750sensor[i][1], BH1750sensor[i][2]).c_str(),
                     will_Topic, BH1750sensor[i][3], BH1750sensor[i][4],
                     BH1750sensor[i][5], BH1750sensor[i][6], BH1750sensor[i][7],
-                    0, Gateway_AnnouncementMsg, will_Message, true, "",
-                    "", "", "", "", false, // device name, device manufacturer, device model, device ID, retain
-                    stateClassNone //State Class
-    );
-  }
-#  endif
-
-#  ifdef ZsensorMQ2
-#    define MQ2parametersCount 2
-  Log.trace(F("MQ2Discovery" CR));
-  char* MQ2sensor[MQ2parametersCount][8] = {
-      {"sensor", "gas", "MQ2", "", jsonVal, "", "", "ppm"},
-      {"binary_sensor", "MQ2", "", "", jsonPresence, "true", "false", ""}
-      //component type,name,availability topic,device class,value template,payload on, payload off, unit of measurement
-  };
-
-  for (int i = 0; i < MQ2parametersCount; i++) {
-    createDiscovery(MQ2sensor[i][0],
-                    subjectMQ2toMQTT, MQ2sensor[i][1], (char*)getUniqueId(MQ2sensor[i][1], MQ2sensor[i][2]).c_str(),
-                    will_Topic, MQ2sensor[i][3], MQ2sensor[i][4],
-                    MQ2sensor[i][5], MQ2sensor[i][6], MQ2sensor[i][7],
                     0, Gateway_AnnouncementMsg, will_Message, true, "",
                     "", "", "", "", false, // device name, device manufacturer, device model, device ID, retain
                     stateClassNone //State Class

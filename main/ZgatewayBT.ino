@@ -121,7 +121,7 @@ void btScanWDG() {
 unsigned long timeBetweenConnect = 0;
 unsigned long timeBetweenActive = 0;
 
-String stateBTMeasures(bool start) {
+void stateBTMeasures(bool start) {
   StaticJsonDocument<JSON_MSG_BUFFER> jsonBuffer;
   JsonObject jo = jsonBuffer.to<JsonObject>();
   jo["bleconnect"] = BTConfig.bleConnect;
@@ -152,12 +152,9 @@ String stateBTMeasures(bool start) {
     Log.notice(F("BT sys: "));
     serializeJsonPretty(jsonBuffer, Serial);
     Serial.println();
-    return ""; // Do not try to erase/write/send config at startup
+    return; // Do not try to erase/write/send config at startup
   }
-  String output;
-  serializeJson(jo, output);
   pub(subjectBTtoMQTT, jo);
-  return (output);
 }
 
 void BTConfig_fromJson(JsonObject& BTdata, bool startup = false) {
@@ -238,12 +235,10 @@ void BTConfig_fromJson(JsonObject& BTdata, bool startup = false) {
   if (BTdata.containsKey("erase") && BTdata["erase"].as<bool>()) {
     // Erase config from NVS (non-volatile storage)
     preferences.begin(Gateway_Short_Name, false);
-    if (preferences.isKey("BTConfig")) {
-      preferences.remove("BTConfig");
-      preferences.end();
-      Log.notice(F("BT config erased" CR));
-      return; // Erase prevails on save, so skipping save
-    }
+    preferences.remove("BTConfig");
+    preferences.end();
+    Log.notice(F("BT config erased" CR));
+    return; // Erase prevails on save, so skipping save
   }
 
   if (BTdata.containsKey("save") && BTdata["save"].as<bool>()) {
@@ -256,7 +251,7 @@ void BTConfig_fromJson(JsonObject& BTdata, bool startup = false) {
     jo["intervalcnct"] = BTConfig.intervalConnect;
     jo["scanduration"] = BTConfig.scanDuration;
     jo["onlysensors"] = BTConfig.pubOnlySensors;
-    jo["randommacs"] = BTConfig.pubRandomMACs;
+    jo["randommac"] = BTConfig.pubRandomMACs;
     jo["hasspresence"] = BTConfig.presenceEnable;
     jo["presenceTopic"] = BTConfig.presenceTopic;
     jo["presenceUseBeaconUuid"] = BTConfig.presenceUseBeaconUuid;
@@ -281,22 +276,20 @@ void BTConfig_fromJson(JsonObject& BTdata, bool startup = false) {
 void BTConfig_load() {
   StaticJsonDocument<JSON_MSG_BUFFER> jsonBuffer;
   preferences.begin(Gateway_Short_Name, true);
-  if (preferences.isKey("BTConfig")) {
-    auto error = deserializeJson(jsonBuffer, preferences.getString("BTConfig", "{}"));
-    preferences.end();
-    Log.notice(F("BT config loaded" CR));
-    if (error) {
-      Log.error(F("BT config deserialization failed: %s, buffer capacity: %u" CR), error.c_str(), jsonBuffer.capacity());
-      return;
-    }
-    if (jsonBuffer.isNull()) {
-      Log.warning(F("BT config is null" CR));
-      return;
-    }
-    JsonObject jo = jsonBuffer.as<JsonObject>();
-    BTConfig_fromJson(jo, true); // Never send MQTT message with config
-    Log.notice(F("BT config loaded" CR));
+  auto error = deserializeJson(jsonBuffer, preferences.getString("BTConfig", "{}"));
+  preferences.end();
+  Log.notice(F("BT config loaded" CR));
+  if (error) {
+    Log.error(F("BT config deserialization failed: %s, buffer capacity: %u" CR), error.c_str(), jsonBuffer.capacity());
+    return;
   }
+  if (jsonBuffer.isNull()) {
+    Log.warning(F("BT config is null" CR));
+    return;
+  }
+  JsonObject jo = jsonBuffer.as<JsonObject>();
+  BTConfig_fromJson(jo, true); // Never send MQTT message with config
+  Log.notice(F("BT config loaded" CR));
 }
 
 void pubBTMainCore(JsonObject& data, bool haPresenceEnabled = true) {
@@ -537,7 +530,7 @@ void DT24Discovery(const char* mac, const char* sensorModel_id) {
       {"sensor", "watt-hour", mac, "power", jsonEnergy, "", "", "kWh", stateClassMeasurement},
       {"sensor", "price", mac, "", jsonMsg, "", "", "", stateClassNone},
       {"sensor", "temp", mac, "temperature", jsonTempc, "", "", "°C", stateClassMeasurement},
-      {"binary_sensor", "inUse", mac, "power", jsonInuse, "", "", "", stateClassNone}
+      {"binary_sensor", "inUse", mac, "power", jsonInuse, "", "", ""}
       //component type,name,availability topic,device class,value template,payload on, payload off, unit of measurement
   };
 
@@ -1113,6 +1106,9 @@ void PublishDeviceData(JsonObject& BLEdata, bool processBLEData) {
     if (!BTConfig.pubRandomMACs && (BLEdata["type"].as<string>()).compare("RMAC") == 0) {
       return;
     }
+    if (BLEdata.containsKey("type") && (BLEdata.containsKey("model") || BLEdata.containsKey("distance"))) { // Only display sensor data with type
+      pubOled(subjectBTtoMQTT, BLEdata);
+    }
     if (!BTConfig.pubAdvData) {
       BLEdata.remove("servicedatauuid");
       BLEdata.remove("servicedata");
@@ -1120,7 +1116,7 @@ void PublishDeviceData(JsonObject& BLEdata, bool processBLEData) {
       BLEdata.remove("mac_type");
       BLEdata.remove("adv_type");
       // tag device properties
-      // BLEdata.remove("type");   type is used by the WebUI module to determine the template used to display the signal
+      BLEdata.remove("type");
       BLEdata.remove("cidc");
       BLEdata.remove("acts");
       BLEdata.remove("cont");

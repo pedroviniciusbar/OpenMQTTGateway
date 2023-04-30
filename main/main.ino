@@ -53,14 +53,6 @@ unsigned long timer_sys_checks = 0;
 #  define ARDUINOJSON_ENABLE_STD_STRING 1
 #endif
 
-/**
- * Deep-sleep for the ESP8266 & ESP32 we need some form of indicator that we have posted the measurements and am ready to deep sleep.
- * Set this to true in the sensor code after publishing the measurement.
- */
-#if defined(DEEP_SLEEP_IN_US) || defined(ESP32_EXT0_WAKE_PIN)
-bool ready_to_sleep = false;
-#endif
-
 #include <ArduinoJson.h>
 #include <ArduinoLog.h>
 #include <PubSubClient.h>
@@ -78,9 +70,6 @@ struct GfSun2000Data {};
 #endif
 
 // Modules config inclusion
-#if defined(ZwebUI) && defined(ESP32)
-#  include "config_WebUI.h"
-#endif
 #if defined(ZgatewayRF) || defined(ZgatewayRF2) || defined(ZgatewayPilight) || defined(ZactuatorSomfy) || defined(ZgatewayRTL_433)
 #  include "config_RF.h"
 #endif
@@ -120,9 +109,6 @@ struct GfSun2000Data {};
 #ifdef ZsensorBH1750
 #  include "config_BH1750.h"
 #endif
-#ifdef ZsensorMQ2
-#  include "config_MQ2.h"
-#endif
 #ifdef ZsensorTEMT6000
 #  include "config_TEMT6000.h"
 #endif
@@ -146,9 +132,6 @@ struct GfSun2000Data {};
 #endif
 #ifdef ZsensorHCSR04
 #  include "config_HCSR04.h"
-#endif
-#ifdef ZsensorC37_YL83_HMRD
-#  include "config_C37_YL83_HMRD.h"
 #endif
 #ifdef ZsensorDHT
 #  include "config_DHT.h"
@@ -200,6 +183,8 @@ char mqtt_user[parameters_size + 1] = MQTT_USER; // not compulsory only if your 
 char mqtt_pass[parameters_size + 1] = MQTT_PASS; // not compulsory only if your broker needs authentication
 char mqtt_server[parameters_size + 1] = MQTT_SERVER;
 char mqtt_port[6] = MQTT_PORT;
+char mqtt_topic[parameters_size + 1] = Base_Topic;
+char gateway_name[parameters_size + 1] = Gateway_Name;
 char ota_pass[parameters_size + 1] = ota_password;
 #ifdef USE_MAC_AS_GATEWAY_NAME
 #  undef WifiManager_ssid
@@ -216,11 +201,24 @@ bool connectedOnce = false; //indicate if we have been connected once to MQTT
 bool connected = false; //indicate whether we are currently connected. Used to detected re-connection
 int failure_number_ntwk = 0; // number of failure connecting to network
 int failure_number_mqtt = 0; // number of failure connecting to MQTT
-
+#ifdef ZmqttDiscovery
+bool disc = true; // Auto discovery with Home Assistant convention
+unsigned long lastDiscovery = 0; // Time of the last discovery to trigger automaticaly to off after DiscoveryAutoOffTimer
+#endif
 unsigned long timer_led_measures = 0;
 static void* eClient = nullptr;
 static unsigned long last_ota_activity_millis = 0;
 #if defined(ESP8266) || defined(ESP32)
+#  include <vector>
+// Flags definition for white list, black list, discovery management
+#  define device_flags_init     0 << 0
+#  define device_flags_isDisc   1 << 0
+#  define device_flags_isWhiteL 1 << 1
+#  define device_flags_isBlackL 1 << 2
+#  define device_flags_connect  1 << 3
+#  define isWhite(device)       device->isWhtL
+#  define isBlack(device)       device->isBlkL
+#  define isDiscovered(device)  device->isDisc
 
 static bool mqtt_secure = MQTT_SECURE_DEFAULT;
 static bool mqtt_cert_validate = MQTT_CERT_VALIDATE_DEFAULT;
@@ -254,7 +252,9 @@ static bool esp32EthConnected = false;
 #  include <WiFiClientSecure.h>
 #  include <WiFiMulti.h>
 WiFiMulti wifiMulti;
+#  include <Preferences.h>
 #  include <WiFiManager.h>
+Preferences preferences;
 #  ifdef MDNS_SD
 #    include <ESPmDNS.h>
 #  endif
@@ -280,6 +280,9 @@ ESP8266WiFiMulti wifiMulti;
 #else
 #  include <Ethernet.h>
 #endif
+
+#define convertTemp_CtoF(c) ((c * 1.8) + 32)
+#define convertTemp_FtoC(f) ((f - 32) * 5 / 9)
 
 // client link to pubsub MQTT
 PubSubClient client;
@@ -410,7 +413,6 @@ void pub(const char* topicori, JsonObject& data) {
 #if jsonPublishing
   Log.trace(F("jsonPubl - ON" CR));
   pubMQTT(topic, dataAsString.c_str());
-  pubWebUI(topicori, data);
 #endif
 
 #if simplePublishing
@@ -596,9 +598,6 @@ void delayWithOTA(long waitMillis) {
 #    endif
 #  endif
     ArduinoOTA.handle();
-#  if defined(ZwebUI) && defined(ESP32)
-    WebUILoop();
-#  endif
     delay(waitStep);
   }
 #else
@@ -782,34 +781,6 @@ void setup() {
   Log.notice(F("OpenMQTTGateway Version: " OMG_VERSION CR));
 #  endif
 
-/**
- * Deep-sleep for the ESP8266 & ESP32 we need some form of indicator that we have posted the measurements and am ready to deep sleep.
- * When woken set back to false.
- */
-#  if defined(DEEP_SLEEP_IN_US) || defined(ESP32_EXT0_WAKE_PIN)
-  ready_to_sleep = false;
-#  endif
-
-#  ifdef DEEP_SLEEP_IN_US
-#    ifdef ESP8266
-  Log.notice(F("Setting wake pin for deep sleep." CR));
-  pinMode(ESP8266_DEEP_SLEEP_WAKE_PIN, WAKEUP_PULLUP);
-#    endif
-#    ifdef ESP32
-  Log.notice(F("Setting duration for deep sleep." CR));
-  if (esp_sleep_enable_timer_wakeup(DEEP_SLEEP_IN_US) != ESP_OK) {
-    Log.error(F("Failed to set deep sleep duration." CR));
-  }
-#    endif
-#  endif
-
-#  ifdef ESP32_EXT0_WAKE_PIN
-  Log.notice(F("Setting EXT0 Wakeup for deep sleep." CR));
-  if (esp_sleep_enable_ext0_wakeup(ESP32_EXT0_WAKE_PIN, ESP32_EXT0_WAKE_PIN_STATE) != ESP_OK) {
-    Log.error(F("Failed to set deep sleep EXT0 Wakeup." CR));
-  }
-#  endif
-
 /*
  The 2 modules below are not connection dependent so start them before the connectivity functions
  Note that the ONOFF module need to start after the RN8209 so that the overCurrent task is launched after the setup of the sensor
@@ -855,11 +826,6 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   //Begining ethernet connection in case of Arduino + W5100
   setup_ethernet();
-#endif
-
-#if defined(ZwebUI) && defined(ESP32)
-  WebUISetup();
-  modules.add(ZwebUI);
 #endif
 
 #if defined(ESP8266) || defined(ESP32)
@@ -912,10 +878,6 @@ void setup() {
 #ifdef ZsensorBH1750
   setupZsensorBH1750();
   modules.add(ZsensorBH1750);
-#endif
-#ifdef ZsensorMQ2
-  setupZsensorMQ2();
-  modules.add(ZsensorMQ2);
 #endif
 #ifdef ZsensorTEMT6000
   setupZsensorTEMT6000();
@@ -1018,10 +980,6 @@ void setup() {
 #ifdef ZsensorADC
   setupADC();
   modules.add(ZsensorADC);
-#endif
-#ifdef ZsensorC37_YL83_HMRD
-  setupZsensorC37_YL83_HMRD();
-  modules.add(ZsensorC37_YL83_HMRD);
 #endif
 #ifdef ZsensorDHT
   setupDHT();
@@ -1239,7 +1197,6 @@ void setup_wifi() {
 #  endif
   }
   Log.notice(F("WiFi ok with manual config credentials" CR));
-  displayPrint("Wifi connected");
 }
 
 #elif defined(ESP8266) || defined(ESP32)
@@ -1407,7 +1364,7 @@ void setup_wifimanager(bool reset_settings) {
   WiFiManagerParameter custom_mqtt_pass("pass", "mqtt pass", mqtt_pass, parameters_size);
   WiFiManagerParameter custom_mqtt_topic("topic", "mqtt base topic", mqtt_topic, mqtt_topic_max_size);
   WiFiManagerParameter custom_mqtt_secure("secure", "mqtt secure", "1", 2, mqtt_secure ? "type=\"checkbox\" checked" : "type=\"checkbox\"");
-  WiFiManagerParameter custom_mqtt_cert("cert", "<br/>mqtt broker cert", mqtt_cert.c_str(), 4096);
+  WiFiManagerParameter custom_mqtt_cert("cert", "<br/>mqtt broker cert", mqtt_cert.c_str(), 2048);
   WiFiManagerParameter custom_gateway_name("name", "gateway name", gateway_name, parameters_size);
   WiFiManagerParameter custom_ota_pass("ota", "ota password", ota_pass, parameters_size);
 #  endif
@@ -1635,9 +1592,6 @@ void loop() {
   if ((Ethernet.hardwareStatus() != EthernetW5100 && Ethernet.linkStatus() == LinkON) || (Ethernet.hardwareStatus() == EthernetW5100)) { //we are able to detect disconnection only on w5200 and w5500
 #endif
     failure_number_ntwk = 0;
-#if defined(ZwebUI) && defined(ESP32)
-    WebUILoop();
-#endif
     if (client.loop()) { // MQTT client is still connected
       InfoIndicatorON();
       failure_number_ntwk = 0;
@@ -1671,9 +1625,6 @@ void loop() {
 #  ifdef ZdisplaySSD1306
         stateSSD1306Display();
 #  endif
-#  if defined(ZwebUI) && defined(ESP32)
-        stateWebUIStatus();
-#  endif
       }
       if (now > (timer_sys_checks + (TimeBetweenCheckingSYS * 1000)) || !timer_sys_checks) {
 #  if defined(ESP32) && defined(MQTT_HTTPS_FW_UPDATE)
@@ -1705,17 +1656,11 @@ void loop() {
 #ifdef ZsensorBH1750
       MeasureLightIntensity(); //Addon to measure Light Intensity with a BH1750
 #endif
-#ifdef ZsensorMQ2
-      MeasureGasMQ2();
-#endif
 #ifdef ZsensorTEMT6000
       MeasureLightIntensityTEMT6000();
 #endif
 #ifdef ZsensorTSL2561
       MeasureLightIntensityTSL2561();
-#endif
-#ifdef ZsensorC37_YL83_HMRD
-      MeasureC37_YL83_HMRDWater(); //Addon for leak detection with a C-37 YL-83 H-MRD
 #endif
 #ifdef ZsensorDHT
       MeasureTempAndHum(); //Addon to measure the temperature with a DHT
@@ -1796,7 +1741,6 @@ void loop() {
         launchRTL_433Discovery(publishDiscovery);
 #  endif
 #endif
-
     } else {
       // MQTT disconnected
       connected = false;
@@ -1824,28 +1768,6 @@ void loop() {
 #endif
 #if defined(ZdisplaySSD1306)
   loopSSD1306();
-#endif
-
-/**
- * Deep-sleep for the ESP8266 & ESP32 - e.g. DEEP_SLEEP_IN_US 30000000 for 30 seconds / wake by ESP32_EXT0_WAKE_PIN.
- * Everything is off and (almost) all execution state is lost.
- */
-#if defined(DEEP_SLEEP_IN_US) || defined(ESP32_EXT0_WAKE_PIN)
-  if (ready_to_sleep) {
-    delay(250); //Give some time for last MQTT messages to be sent
-#  ifdef DEEP_SLEEP_IN_US
-    Log.notice(F("Entering deep sleep for %l us." CR), DEEP_SLEEP_IN_US);
-#  endif
-#  ifdef ESP32_EXT0_WAKE_PIN
-    Log.notice(F("Entering deep sleep, EXT0 Wakeup by pin : %l." CR), ESP32_EXT0_WAKE_PIN);
-#  endif
-#  ifdef ESP8266
-    ESP.deepSleep(DEEP_SLEEP_IN_US);
-#  endif
-#  ifdef ESP32
-    esp_deep_sleep_start();
-#  endif
-  }
 #endif
 }
 
@@ -1916,7 +1838,7 @@ String UTCtimestamp() {
 #endif
 
 #if defined(ESP8266) || defined(ESP32) || defined(__AVR_ATmega2560__) || defined(__AVR_ATmega1280__)
-String stateMeasures() {
+void stateMeasures() {
   StaticJsonDocument<JSON_MSG_BUFFER> jsonBuffer;
   JsonObject SYSdata = jsonBuffer.to<JsonObject>();
   SYSdata["uptime"] = uptime();
@@ -2008,24 +1930,8 @@ String stateMeasures() {
   }
 #  endif
   SYSdata["modules"] = modules;
-
   pub(subjectSYStoMQTT, SYSdata);
   pubOled(subjectSYStoMQTT, SYSdata);
-
-  char jsonChar[100];
-  serializeJson(modules, jsonChar, 99);
-
-  String _modules = jsonChar;
-
-  _modules.replace(",", ", ");
-  _modules.replace("[", "");
-  _modules.replace("]", "");
-  _modules.replace("\"", "'");
-
-  SYSdata["modules"] = _modules.c_str();
-  String output;
-  serializeJson(SYSdata, output);
-  return output;
 }
 #endif
 
@@ -2275,6 +2181,9 @@ void MQTTHttpsFWUpdate(char* topicOri, JsonObject& HttpsFwUpdateData) {
 #  endif
 #  ifdef ESP32
       } else if (strcmp(version, "latest") == 0) {
+#    if defined(ZgatewayBT)
+        stopProcessing();
+#    endif
         systemUrl = RELEASE_LINK + latestVersion + "/" + ENV_NAME + "-firmware.bin";
         url = systemUrl.c_str();
         Log.notice(F("Using system OTA url with latest version %s" CR), url);
@@ -2291,9 +2200,7 @@ void MQTTHttpsFWUpdate(char* topicOri, JsonObject& HttpsFwUpdateData) {
         Log.error(F("Invalid URL" CR));
         return;
       }
-#  if defined(ZgatewayBT)
-      stopProcessing();
-#  endif
+
       Log.warning(F("Starting firmware update" CR));
       SendReceiveIndicatorON();
       ErrorIndicatorON();
@@ -2411,7 +2318,7 @@ void MQTTtoSYS(char* topicOri, JsonObject& SYSdata) { // json object decoding
       client.disconnect();
       WiFi.disconnect(true);
 
-      Log.warning(F("Attempting connection to new AP %s" CR), (const char*)SYSdata["wifi_ssid"]);
+      Log.warning(F("Attempting connection to new AP" CR));
       WiFi.begin((const char*)SYSdata["wifi_ssid"], (const char*)SYSdata["wifi_pass"]);
 #  if defined(ESP32) && (defined(WifiGMode) || defined(WifiPower))
       setESP32WifiPorotocolTxPower();
@@ -2427,21 +2334,6 @@ void MQTTtoSYS(char* topicOri, JsonObject& SYSdata) { // json object decoding
 #  endif
       }
       ESPRestart();
-    }
-
-    bool disconnectClient = false; // Trigger client.disconnet if a user/password change doesn't
-
-    if (SYSdata.containsKey("mqtt_topic") || SYSdata.containsKey("gateway_name")) {
-      if (SYSdata.containsKey("mqtt_topic")) {
-        strncpy(mqtt_topic, SYSdata["mqtt_topic"], parameters_size);
-      }
-      if (SYSdata.containsKey("gateway_name")) {
-        strncpy(gateway_name, SYSdata["gateway_name"], parameters_size);
-      }
-#  ifndef ESPWifiManualSetup
-      saveMqttConfig();
-#  endif
-      disconnectClient = true; // trigger reconnect in loop using the new topic/name
     }
 
 #  ifdef MQTTsetMQTT
@@ -2470,7 +2362,6 @@ void MQTTtoSYS(char* topicOri, JsonObject& SYSdata) { // json object decoding
 #    if defined(ZgatewayBT) && defined(ESP32)
         stopProcessing();
 #    endif
-        disconnectClient = false;
         client.disconnect();
         update_server = true;
         if (secure_connect != mqtt_secure) {
@@ -2494,7 +2385,6 @@ void MQTTtoSYS(char* topicOri, JsonObject& SYSdata) { // json object decoding
 #    if defined(ZgatewayBT) && defined(ESP32)
         stopProcessing();
 #    endif
-        disconnectClient = false;
         client.disconnect();
       }
 
@@ -2538,9 +2428,17 @@ void MQTTtoSYS(char* topicOri, JsonObject& SYSdata) { // json object decoding
       ESPRestart();
     }
 #  endif
-
-    if (disconnectClient) {
-      client.disconnect();
+    if (SYSdata.containsKey("mqtt_topic") || SYSdata.containsKey("gateway_name")) {
+      if (SYSdata.containsKey("mqtt_topic")) {
+        strncpy(mqtt_topic, SYSdata["mqtt_topic"], parameters_size);
+      }
+      if (SYSdata.containsKey("gateway_name")) {
+        strncpy(gateway_name, SYSdata["gateway_name"], parameters_size);
+      }
+#  ifndef ESPWifiManualSetup
+      saveMqttConfig();
+#  endif
+      client.disconnect(); // reconnects in loop using the new topic/name
     }
 #endif
 

@@ -46,12 +46,10 @@ void ONOFFConfig_fromJson(JsonObject& ONOFFdata) {
   if (ONOFFdata.containsKey("erase") && ONOFFdata["erase"].as<bool>()) {
     // Erase config from NVS (non-volatile storage)
     preferences.begin(Gateway_Short_Name, false);
-    if (preferences.isKey("ONOFFConfig")) {
-      preferences.remove("ONOFFConfig");
-      preferences.end();
-      Log.notice(F("ONOFF config erased" CR));
-      return; // Erase prevails on save, so skipping save
-    }
+    preferences.remove("ONOFFConfig");
+    preferences.end();
+    Log.notice(F("ONOFF config erased" CR));
+    return; // Erase prevails on save, so skipping save
   }
   if (ONOFFdata.containsKey("save") && ONOFFdata["save"].as<bool>()) {
     StaticJsonDocument<JSON_MSG_BUFFER> jsonBuffer;
@@ -71,21 +69,19 @@ void ONOFFConfig_fromJson(JsonObject& ONOFFdata) {
 void ONOFFConfig_load() {
   StaticJsonDocument<JSON_MSG_BUFFER> jsonBuffer;
   preferences.begin(Gateway_Short_Name, true);
-  if (preferences.isKey("ONOFFConfig")) {
-    auto error = deserializeJson(jsonBuffer, preferences.getString("ONOFFConfig", "{}"));
-    preferences.end();
-    if (error) {
-      Log.error(F("ONOFF config deserialization failed: %s, buffer capacity: %u" CR), error.c_str(), jsonBuffer.capacity());
-      return;
-    }
-    if (jsonBuffer.isNull()) {
-      Log.warning(F("ONOFF config is null" CR));
-      return;
-    }
-    JsonObject jo = jsonBuffer.as<JsonObject>();
-    ONOFFConfig_fromJson(jo);
-    Log.notice(F("ONOFF config loaded" CR));
+  auto error = deserializeJson(jsonBuffer, preferences.getString("ONOFFConfig", "{}"));
+  preferences.end();
+  if (error) {
+    Log.error(F("ONOFF config deserialization failed: %s, buffer capacity: %u" CR), error.c_str(), jsonBuffer.capacity());
+    return;
   }
+  if (jsonBuffer.isNull()) {
+    Log.warning(F("ONOFF config is null" CR));
+    return;
+  }
+  JsonObject jo = jsonBuffer.as<JsonObject>();
+  ONOFFConfig_fromJson(jo);
+  Log.notice(F("ONOFF config loaded" CR));
 }
 #  else
 void ONOFFConfig_init(){};
